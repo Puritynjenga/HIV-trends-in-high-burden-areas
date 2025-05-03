@@ -1,0 +1,231 @@
+---
+##DATASET 1
+
+```{r setup, include=TRUE}
+# Load reticulate to enable Python chunks
+
+library(reticulate)
+py_discover_config()
+
+```
+```{r}
+reticulate::py_config()
+```
+
+
+```{r}
+library(reticulate)
+use_python("C:/Users/purit/AppData/Local/R/cache/R/reticulate/uv/cache/archive-v0/4N0fNatf_448ukxYjvVY9/Scripts/python.exe", required = TRUE)
+
+```
+
+
+## Loading the Datasets
+```{python}
+import pandas as pd
+import numpy as np
+
+# Load WHO HIV data (2000–2023)
+hiv_data = pd.read_csv("C:/Users/purit/OneDrive/Documents/PROJECTS/CEMA internship/HIV data 2000-2023.csv" ,encoding="ISO-8859-1")
+```
+
+
+```{python}
+
+# Preview datasets
+hiv_data.head(5)
+```
+
+## Filtering and Preparing HIV Data(Data clea)
+
+```{python}
+import re
+
+# Filter for HIV indicator
+hiv_filtered = hiv_data[hiv_data['Indicator'].str.contains("Estimated number of people \(all ages\) living with HIV", regex=True)].copy()
+hiv_filtered['Estimate'] = hiv_filtered['Value'].str.extract(r'([\d,]+)')[0].str.replace(',', '')
+hiv_filtered['Estimate'] = pd.to_numeric(hiv_filtered['Estimate'], errors='coerce')
+hiv_filtered = hiv_filtered[['Location', 'SpatialDimValueCode', 'Period', 'Estimate', 'ParentLocationCode']]
+hiv_filtered = hiv_filtered.rename(columns={'SpatialDimValueCode': 'Country_Code', 'Period': 'Year'})
+hiv_filtered.head(10)
+print(hiv_filtered.columns)
+
+
+```
+
+## Clean Poverty Data
+
+```{python}
+import pandas as pd
+poverty_data = pd.read_excel("multidimensional_poverty.xlsx", skiprows=1)
+
+# Rename columns for easier access
+poverty_data = poverty_data.rename(columns={
+    'Country code': 'Country_Code',
+    'Reporting year': 'Reporting_Year',
+    'Economy': 'Country',
+    'Monetary (%)': 'Monetary_Deprivation',
+    'Educational attainment (%)': 'Education_Attainment',
+    'Educational enrollment (%)': 'Education_Enrollment',
+    'Electricity (%)': 'Electricity',
+    'Sanitation (%)': 'Sanitation',
+    'Drinking water (%)': 'Drinking_Water',
+    'Multidimensional poverty headcount ratio (%)': 'Poverty_Headcount'
+})
+
+# Drop rows with missing key information
+poverty_data = poverty_data.dropna(subset=['Country_Code', 'Reporting_Year'])
+
+# Replace '-' with NaN and ensure numeric types
+columns_to_clean = [
+    'Monetary_Deprivation', 'Education_Attainment', 'Education_Enrollment',
+    'Electricity', 'Sanitation', 'Drinking_Water', 'Poverty_Headcount'
+]
+
+for col in columns_to_clean:
+    poverty_data[col] = poverty_data[col].replace('-', pd.NA)
+    poverty_data[col] = pd.to_numeric(poverty_data[col], errors='coerce')
+
+# Preview cleaned poverty data
+poverty_data.head()
+print(poverty_data.columns)
+
+
+
+```
+
+## Visualization: Trend of HIV Cases in Countries Contributing to 75% of Global Burden
+
+```{python}
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+latest_year = hiv_filtered['Year'].max()
+top_data = hiv_filtered[hiv_filtered['Year'] == latest_year].sort_values(by='Estimate', ascending=False)
+top_data['CumulativeSum'] = top_data['Estimate'].cumsum()
+total_sum = top_data['Estimate'].sum()
+top_data['CumulativePercent'] = 100 * top_data['CumulativeSum'] / total_sum
+top_75_countries = top_data[top_data['CumulativePercent'] <= 75]['Location'].unique()
+
+# Filter trend data
+top_trend_data = hiv_filtered[hiv_filtered['Location'].isin(top_75_countries)]
+
+# Plot
+plt.figure(figsize=(16, 8))
+sns.lineplot(data=top_trend_data, x='Year', y='Estimate', hue='Location', marker='o')
+plt.title("Trend of HIV Cases in Countries Contributing to 75% of Global Burden")
+plt.xlabel("Year")
+plt.ylabel("Estimated HIV Cases")
+plt.legend(loc='upper right', bbox_to_anchor=(1.2, 1), fontsize='small')
+plt.tight_layout()
+plt.show()
+```
+
+```
+```{r}
+## Visualization: Trend of HIV Cases in Top 75% Countries Within Each WHO Region
+
+```{python}
+
+# Identify top 75% countries within each WHO region
+region_latest = hiv_filtered[(hiv_filtered['Year'] == latest_year) & (hiv_filtered['Estimate'].notna())]
+
+region_top = (
+    region_latest.sort_values(['ParentLocationCode', 'Estimate'], ascending=[True, False])
+    .groupby('ParentLocationCode')
+    .apply(lambda x: x.assign(
+        CumulativeSum = x['Estimate'].cumsum(),
+        Total = x['Estimate'].sum(),
+        CumulativePercent = 100 * x['Estimate'].cumsum() / x['Estimate'].sum()
+    ))
+    .reset_index(drop=True)
+)
+
+region_top_75 = region_top[region_top['CumulativePercent'] <= 75]
+region_countries = region_top_75['Location'].unique()
+
+# Filter main dataset
+region_trends = hiv_filtered[hiv_filtered['Location'].isin(region_countries)]
+
+# trends by WHO region
+
+g = sns.FacetGrid(region_trends, col='ParentLocationCode', col_wrap=3, height=4.5, sharey=False)
+g.map_dataframe(sns.lineplot, x='Year', y='Estimate', hue='Location', linewidth=2, marker='o')
+
+# Move the legend outside the plot
+g.add_legend(title="Country", bbox_to_anchor=(1, 1), loc='upper left', borderaxespad=0.1)
+
+# Set labels and titles
+g.set_axis_labels("Year", "Estimated HIV Cases")
+g.set_titles(col_template="WHO Region: {col_name}")
+g.fig.suptitle("Trend of HIV Cases in Top 75% Burden Countries by WHO Region", fontsize=14)
+
+# Add gridlines
+for ax in g.axes.flatten():
+    ax.grid(True, linestyle='--', alpha=0.7)
+
+# Resize figure and fix overlap
+g.fig.set_size_inches(16, 10)
+#g.fig.subplots_adjust(top=0.90)  # <- THIS LINE FIXES THE OVERLAP
+
+plt.tight_layout()
+plt.show()
+
+
+
+```
+
+
+```{python}
+
+# Merge on matching keys
+merged_data = pd.merge(
+    hiv_filtered,
+    poverty_data,
+    left_on=['Country_Code', 'Year'],
+    right_on=['Country_Code', 'Reporting_Year'],
+    how='inner'
+)
+
+# Drop rows with any missing key values
+merged_data = merged_data.dropna(subset=[
+    'Estimate', 'Poverty_Headcount', 'Education_Attainment',
+    'Education_Enrollment', 'Electricity', 'Sanitation', 'Drinking_Water'
+])
+
+# Apply log transformation to HIV estimates
+import numpy as np
+merged_data['log_HIV'] = np.log1p(merged_data['Estimate'])
+
+# Preview result
+merged_data.head()
+
+```title: "HIV trends"
+author: "Purity Njenga"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
